@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Documenta Setup for Windows Server. The MSI only delivers install.ps1 and a Start Menu entry:
+  the real work (WSL 2, the Ubuntu distro, Docker, the app) happens in install.ps1, in a visible
+  PowerShell window, because it downloads gigabytes and may need a reboot. The MSI's own uninstall
+  removes just these files; `documenta uninstall` removes the app and its data.
+  Built by ../../.github/workflows/msi.yml with WiX 5: wix build -d Version=1.2.0 ...
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Documenta" Manufacturer="Documenta" Version="$(var.Version)" Language="1033"
+           UpgradeCode="7f3c1c61-6f1a-4f4e-9b0a-2d8d3a9c6b51" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Documenta Setup is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Documenta" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="MenuFolder" Name="Documenta" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Files">
+      <Component Directory="INSTALLFOLDER">
+        <File Id="InstallPs1" Source="..\..\install.ps1" />
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Id="ReadmeMd" Source="..\..\README.md" />
+      </Component>
+      <Component Id="MenuShortcut" Directory="MenuFolder" Guid="2b5d0f8e-3c7a-4a0d-8c5e-1f6e2a9b7c43">
+        <Shortcut Id="InstallShortcut" Name="Install or update Documenta"
+                  Description="Installs Documenta inside WSL 2, or updates it"
+                  Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+                  Arguments="-NoProfile -ExecutionPolicy Bypass -NoExit -File &quot;[INSTALLFOLDER]install.ps1&quot;"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Documenta\Setup" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Documenta Setup">
+      <ComponentGroupRef Id="Files" />
+    </Feature>
+
+    <!-- Launch install.ps1 from the finish page; it asks Windows for elevation itself -->
+    <CustomAction Id="LaunchInstaller" Directory="INSTALLFOLDER"
+                  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -NoExit -File &quot;[INSTALLFOLDER]install.ps1&quot;"
+                  Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Run the Documenta installer now (needs internet; opens PowerShell)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchInstaller"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+  </Package>
+</Wix>

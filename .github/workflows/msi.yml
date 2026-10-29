@@ -1,0 +1,54 @@
+# Builds Documenta-Setup.msi (the Windows installer, see windows/msi/Documenta.wxs) and attaches it
+# to a GitHub Release. Runs when a version tag is pushed (git tag v1.2.0 && git push --tags) or by hand.
+name: Build Windows installer
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix
+          wix extension add -g WixToolset.UI.wixext
+
+      - name: Version from the tag
+        id: ver
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || v="0.0.0"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          wix build -ext WixToolset.UI.wixext -arch x64 `
+            -d Version=${{ steps.ver.outputs.version }} `
+            -b windows/msi `
+            windows/msi/Documenta.wxs `
+            -o Documenta-Setup.msi
+          Get-Item Documenta-Setup.msi | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Documenta-Setup
+          path: Documenta-Setup.msi
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Documenta-Setup.msi
+          body: |
+            Windows Server installer. Run it, keep "Run the Documenta installer now" ticked, and follow the PowerShell window.
+            Linux: `curl -fsSL https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.sh | sudo bash`

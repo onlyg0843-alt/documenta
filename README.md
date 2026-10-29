@@ -32,6 +32,21 @@ Example with another port:
 DOCUMENTA_PORT=8080 bash <(curl -fsSL https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.sh)
 ```
 
+## Install on Windows Server
+
+Documenta runs as Linux containers, so on Windows it lives inside WSL 2 (built into Windows Server 2022 and Windows 10/11; the server needs virtualization enabled, which for a VM means nested virtualization). Two ways to start:
+
+- **Setup program:** download `Documenta-Setup.msi` from the [latest release](https://github.com/onlyg0843-alt/documenta/releases/latest), run it and keep "Run the Documenta installer now" ticked. Later, "Install or update Documenta" in the Start Menu runs the same installer.
+- **One command**, in a PowerShell window started as Administrator:
+
+  ```powershell
+  irm https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.ps1 | iex
+  ```
+
+The installer enables WSL 2 (one reboot the first time, then run it again), creates a Linux environment named `documenta`, installs Docker inside it and then does exactly what the Linux install does. It forwards the chosen port from Windows to the app and registers a startup task; it asks for your Windows password once so the app can start after a reboot without anyone signing in (press Enter to skip, then it starts when you sign in). Options are the same as on Linux, set as `$env:DOCUMENTA_PORT = '8080'` before the command.
+
+Afterwards `documenta update`, `status`, `logs` and the others work from any new PowerShell or Command Prompt window, plus two Windows-only ones: `documenta backup [file]` exports the whole system including data to a `.tar`, and `documenta uninstall` removes everything.
+
 ## Update
 
 ```bash
