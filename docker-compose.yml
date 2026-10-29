@@ -1,0 +1,118 @@
+# The compose file installed on customers' servers by install.sh (which also writes the .env it reads).
+# Images come from GitHub Container Registry, built by the release workflow of the private repo
+# only-doc-main: one package, ghcr.io/onlyg0843-alt/documenta, with the service in the tag
+# (api-…, frontend-…, bot-…).
+# Data lives in ./doc_data next to this file: db (MongoDB), redis (sign-in sessions) and
+# backend (uploads, license, logs).
+
+services:
+
+  # Holds the sign-in sessions (refresh tokens); persisted so a restart doesn't sign everyone out
+  redis:
+    image: redis:7-alpine
+    container_name: doc_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./doc_data/redis:/data
+    networks:
+      - internal-local-nw
+
+  mongodb:
+    image: mongo:latest
+    container_name: doc_mongodb
+    restart: unless-stopped
+    expose:
+      - "27017"
+    volumes:
+      - ./doc_data/db:/data/db
+    networks:
+      - internal-local-nw
+
+  api:
+    image: ghcr.io/onlyg0843-alt/documenta:api-${DOCUMENTA_VERSION:-latest}
+    container_name: doc_backend
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: unless-stopped
+    expose:
+      - "3000"
+    volumes:
+      - ./doc_data/backend:/app/data
+      - /etc/machine-id:/etc/host-machine-id:ro   # the license is bound to this machine
+    depends_on:
+      - redis
+      - mongodb
+    env_file:
+      - .env
+    environment:
+      - REDIS_URI=redis
+      - MONGODB_URI=mongodb://mongodb:27017
+      - TELEGRAM_BOT_URL=http://telegram-bot:4000
+      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:?missing in .env, run install.sh}
+      - TELEGRAM_INTERNAL_SECRET=${TELEGRAM_INTERNAL_SECRET:?missing in .env, run install.sh}
+    networks:
+      - internal-local-nw
+      - external-ingress-nw
+
+  # Posts new files to the customers' Telegram groups; needs internet for api.telegram.org
+  telegram-bot:
+    image: ghcr.io/onlyg0843-alt/documenta:bot-${DOCUMENTA_VERSION:-latest}
+    container_name: doc_telegram_bot
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: unless-stopped
+    expose:
+      - "4000"
+    depends_on:
+      - api
+    environment:
+      - BACKEND_URL=http://api:3000
+      - TELEGRAM_INTERNAL_SECRET=${TELEGRAM_INTERNAL_SECRET:?missing in .env, run install.sh}
+    networks:
+      - internal-local-nw
+      - external-ingress-nw
+
+  # React app plus nginx, which proxies /api/ to api and /ds-v1/ to onlyoffice (config is inside the image)
+  frontend:
+    image: ghcr.io/onlyg0843-alt/documenta:frontend-${DOCUMENTA_VERSION:-latest}
+    container_name: doc_frontend
+    restart: unless-stopped
+    ports:
+      - "${DOCUMENTA_PORT:-80}:80"
+    depends_on:
+      - api
+    networks:
+      - external-ingress-nw
+      - internal-local-nw
+
+  # Pinned on purpose: a customer's `documenta update` must not replace the document server (it drops
+  # every open editing session). Bump the version here and in only-doc-main (docker-compose.yml and
+  # scripts/build-release.js) together, as a deliberate release.
+  onlyoffice:
+    image: onlyoffice/documentserver:10.0
+    container_name: doc_onlyoffice
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      - SUBFILTER=/ds-v1/
+      - JWT_ENABLED=true
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:?missing in .env, run install.sh}
+      - JWT_HEADER=Authorization
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+      - ALLOW_META_IP_ADDRESS=true
+      - WOPI_CLIENT_MAX_BODY_SIZE=200M
+    networks:
+      - external-ingress-nw
+      - internal-local-nw
+
+networks:
+  # No internet: database, cache and document server traffic stays inside
+  internal-local-nw:
+    driver: bridge
+    internal: true
+  external-ingress-nw:
+    driver: bridge

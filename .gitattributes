@@ -1,0 +1,4 @@
+* text=auto
+
+# Runs inside Linux; CRLF would break the shebang
+*.sh text eol=lf
