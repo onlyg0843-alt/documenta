@@ -16,10 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned: the .wxs uses the WiX 4/5 schema and the UI extension must match the tool's version
       - name: Install WiX
+        shell: pwsh
         run: |
-          dotnet tool install --global wix
-          wix extension add -g WixToolset.UI.wixext
+          dotnet --version
+          dotnet tool install --global wix --version 5.0.2
+          wix --version
+          wix extension add --global WixToolset.UI.wixext/5.0.2
+          wix extension list --global
 
       - name: Version from the tag
         id: ver
