@@ -32,6 +32,47 @@ function Say($msg)  { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Fail($msg) { Write-Host "Error: $msg" -ForegroundColor Red; throw 'Documenta installation stopped.' }
 function Test-PortBusy($p) { [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue) }
 
+# The network card whose address is shown as the app's address. Only physical adapters count (virtual
+# ones like vEthernet/WSL/Hyper-V switches are skipped). With several, the user picks one within 20
+# seconds, otherwise adapter 0 is used. The choice is remembered in <dir>\adapter for later runs.
+function Select-Adapter($dir) {
+    $candidates = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object Status -eq 'Up' | Sort-Object ifIndex | ForEach-Object {
+        $ip = (Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+               Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress
+        if ($ip) { [pscustomobject]@{ Name = $_.Name; Description = $_.InterfaceDescription; IP = $ip } }
+    })
+    if ($candidates.Count -eq 0) { return $null }
+    if ($candidates.Count -eq 1) { return $candidates[0] }
+
+    $savedFile = "$dir\adapter"
+    if (Test-Path $savedFile) {
+        $saved = $candidates | Where-Object Name -eq (Get-Content $savedFile -First 1)
+        if ($saved) { return $saved }
+    }
+
+    Write-Host ''
+    Write-Host 'This server has several network cards. Which one should people use to reach Documenta?' -ForegroundColor Yellow
+    for ($i = 0; $i -lt $candidates.Count; $i++) {
+        Write-Host ("  {0})  {1,-16} {2}  ({3})" -f $i, $candidates[$i].IP, $candidates[$i].Name, $candidates[$i].Description)
+    }
+    Write-Host "Press the number (20 seconds, then 0 is used): " -NoNewline
+    $choice = $null
+    try {
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if ($key.KeyChar -match '^\d$' -and [int]$key.KeyChar -lt $candidates.Count) { $choice = [int]$key.KeyChar; break }
+            }
+            Start-Sleep -Milliseconds 200
+        }
+    } catch { }   # no interactive console: use the default
+    if ($null -eq $choice) { $choice = 0 }
+    Write-Host $choice
+    Set-Content -Path $savedFile -Value $candidates[$choice].Name
+    return $candidates[$choice]
+}
+
 function Install-Documenta {
 
     # ----- administrator -----
@@ -198,12 +239,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0documenta.ps1" %*
     Start-ScheduledTask -TaskName $TaskName
 
     # ----- done -----
-    $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.InterfaceAlias -notlike '*WSL*' -and $_.InterfaceAlias -notlike 'vEthernet*' } |
-        Select-Object -First 1).IPAddress
-    $url = "http://$(if ($ip) { $ip } else { $env:COMPUTERNAME })$(if ($Port -ne 80) { ":$Port" })"
+    $adapter = Select-Adapter $Dir
+    $url = "http://$(if ($adapter) { $adapter.IP } else { $env:COMPUTERNAME })$(if ($Port -ne 80) { ":$Port" })"
     Write-Host ''
     Say "Documenta is running at $url"
+    if ($adapter) { Write-Host "    Network:      $($adapter.Name) ($($adapter.Description)); the app answers on every address of this server" }
     if ($fresh) { Write-Host '    First login:  superadmin / changeme12345  (you will be asked to change it)' }
     Write-Host "    Files:        $Dir  (the app and its data live in the WSL distro '$Distro')"
     Write-Host '    Commands:     documenta update | status | logs | restart | stop | start | backup | uninstall'
