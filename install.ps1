@@ -32,15 +32,20 @@ function Say($msg)  { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Fail($msg) { Write-Host "Error: $msg" -ForegroundColor Red; throw 'Documenta installation stopped.' }
 function Test-PortBusy($p) { [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue) }
 
-# The network card whose address is shown as the app's address. Only physical adapters count (virtual
-# ones like vEthernet/WSL/Hyper-V switches are skipped). With several, the user picks one within 20
-# seconds, otherwise adapter 0 is used. The choice is remembered in <dir>\adapter for later runs.
+# The network card whose address is shown as the app's address. The app answers on every address of the
+# server (the port forwarding listens on all of them); this only decides which one is shown. Virtual
+# adapters are listed too, except WSL's own: on a Hyper-V host or with NIC teaming the right one is
+# virtual. Physical ones come first. With several, the user picks one within 20 seconds, otherwise
+# adapter 0 is used. The choice is remembered in <dir>\adapter for later runs.
 function Select-Adapter($dir) {
-    $candidates = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object Status -eq 'Up' | Sort-Object ifIndex | ForEach-Object {
-        $ip = (Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-               Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress
-        if ($ip) { [pscustomobject]@{ Name = $_.Name; Description = $_.InterfaceDescription; IP = $ip } }
-    })
+    $candidates = @(Get-NetAdapter -ErrorAction SilentlyContinue |
+        Where-Object { $_.Status -eq 'Up' -and $_.Name -notlike 'vEthernet (WSL*' -and $_.InterfaceDescription -notlike '*Loopback*' } |
+        Sort-Object -Property @{ Expression = 'Virtual' }, ifIndex |
+        ForEach-Object {
+            $ip = (Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                   Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress
+            if ($ip) { [pscustomobject]@{ Name = $_.Name; Description = $_.InterfaceDescription; IP = $ip; Virtual = [bool]$_.Virtual } }
+        })
     if ($candidates.Count -eq 0) { return $null }
     if ($candidates.Count -eq 1) { return $candidates[0] }
 
@@ -51,9 +56,10 @@ function Select-Adapter($dir) {
     }
 
     Write-Host ''
-    Write-Host 'This server has several network cards. Which one should people use to reach Documenta?' -ForegroundColor Yellow
+    Write-Host 'This server has several network adapters. Which address should people use to reach Documenta?' -ForegroundColor Yellow
     for ($i = 0; $i -lt $candidates.Count; $i++) {
-        Write-Host ("  {0})  {1,-16} {2}  ({3})" -f $i, $candidates[$i].IP, $candidates[$i].Name, $candidates[$i].Description)
+        $kind = if ($candidates[$i].Virtual) { 'virtual' } else { 'physical' }
+        Write-Host ("  {0})  {1,-16} {2}  ({3}, {4})" -f $i, $candidates[$i].IP, $candidates[$i].Name, $candidates[$i].Description, $kind)
     }
     Write-Host "Press the number (20 seconds, then 0 is used): " -NoNewline
     $choice = $null
@@ -100,9 +106,13 @@ function Install-Documenta {
     try { & wsl.exe --update 2>$null | Out-Null } catch { }   # systemd inside WSL needs a recent version
     & wsl.exe --set-default-version 2 | Out-Null
 
+    New-Item -ItemType Directory -Force -Path "$Dir\wsl" | Out-Null
+
+    # ----- the network adapter, asked now while someone is still watching -----
+    $adapter = Select-Adapter $Dir
+
     # ----- the port -----
     # Checked only before the first install: afterwards the port is ours (the forwarding rule listens on it).
-    New-Item -ItemType Directory -Force -Path "$Dir\wsl" | Out-Null
     $portFile = "$Dir\port"
     if ($Port) {
         if (-not (Test-Path $portFile) -and (Test-PortBusy $Port)) {
@@ -243,8 +253,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0documenta.ps1" %*
     Start-ScheduledTask -TaskName $TaskName
 
     # ----- done -----
-    $adapter = Select-Adapter $Dir
-    $url = "http://$(if ($adapter) { $adapter.IP } else { $env:COMPUTERNAME })$(if ($Port -ne 80) { ":$Port" })"
+    $url ="http://$(if ($adapter) { $adapter.IP } else { $env:COMPUTERNAME })$(if ($Port -ne 80) { ":$Port" })"
     Write-Host ''
     Say "Documenta is running at $url"
     if ($adapter) { Write-Host "    Network:      $($adapter.Name) ($($adapter.Description)); the app answers on every address of this server" }
