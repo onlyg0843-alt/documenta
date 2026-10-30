@@ -12,15 +12,15 @@
 #
 # Options, as environment variables:
 #   DOCUMENTA_DIR      install folder            default /opt/documenta
-#   DOCUMENTA_VERSION  image tag to run          default latest (e.g. 1.2.0)
-#   DOCUMENTA_PORT     web port                  default 80
+#   DOCUMENTA_VERSION  image tag to run          default latest (e.g. 1.2.0); kept on re-runs
+#   DOCUMENTA_PORT     web port                  default 80, or 5075 when 80 is taken; kept on re-runs
 #   DOCUMENTA_REF      git ref to fetch files from, default main (use the tag for a pinned version)
 set -euo pipefail
 
 REPO="onlyg0843-alt/documenta"
 DOCUMENTA_DIR="${DOCUMENTA_DIR:-/opt/documenta}"
-DOCUMENTA_VERSION="${DOCUMENTA_VERSION:-latest}"
-DOCUMENTA_PORT="${DOCUMENTA_PORT:-80}"
+DOCUMENTA_VERSION="${DOCUMENTA_VERSION:-}"   # empty = not requested: keep the installed one, else latest
+DOCUMENTA_PORT="${DOCUMENTA_PORT:-}"         # empty = not requested: keep the installed one, else 80 / 5075
 DOCUMENTA_REF="${DOCUMENTA_REF:-main}"
 RAW="https://raw.githubusercontent.com/${REPO}/${DOCUMENTA_REF}"
 
@@ -76,16 +76,40 @@ set_default() {  # set_default KEY VALUE — only when KEY is not in .env yet
 }
 new_secret() { head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
+# Something listening on the port (checked only before the first install: afterwards it's our own container)
+port_busy() {
+    if command -v ss >/dev/null 2>&1; then ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"
+    else (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; fi
+}
+installed_port="$(grep '^DOCUMENTA_PORT=' .env | cut -d= -f2- || true)"
+if [ -n "$DOCUMENTA_PORT" ]; then
+    PORT="$DOCUMENTA_PORT"
+    if [ -z "$installed_port" ] && port_busy "$PORT"; then
+        fail "Port $PORT is already in use. Choose another one with DOCUMENTA_PORT=<port>."
+    fi
+elif [ -n "$installed_port" ]; then
+    PORT="$installed_port"
+else
+    PORT=80
+    if port_busy 80; then
+        PORT=5075
+        say "Port 80 is in use by another program; using port 5075 instead"
+        if port_busy 5075; then fail "Ports 80 and 5075 are both in use. Choose another one with DOCUMENTA_PORT=<port>."; fi
+    fi
+fi
+
 set_default PORT 3000
 set_default DB_NAME doc_db
 set_default REDIS_PORT 6379
-set_default DOCUMENTA_VERSION "$DOCUMENTA_VERSION"
-set_default DOCUMENTA_PORT "$DOCUMENTA_PORT"
+set_default DOCUMENTA_VERSION "${DOCUMENTA_VERSION:-latest}"
+set_default DOCUMENTA_PORT "$PORT"
 for key in ACCESS_TOKEN_SECRET REFRESH_TOKEN_SECRET ONLYOFFICE_JWT_SECRET TELEGRAM_INTERNAL_SECRET; do
     set_default "$key" "$(new_secret)"
 done
-# A requested version or port wins over what an earlier run wrote
-sed -i "s|^DOCUMENTA_VERSION=.*|DOCUMENTA_VERSION=${DOCUMENTA_VERSION}|; s|^DOCUMENTA_PORT=.*|DOCUMENTA_PORT=${DOCUMENTA_PORT}|" .env
+# An explicitly requested version or port wins over what an earlier run wrote; otherwise those are kept
+if [ -n "$DOCUMENTA_VERSION" ]; then sed -i "s|^DOCUMENTA_VERSION=.*|DOCUMENTA_VERSION=${DOCUMENTA_VERSION}|" .env; fi
+if [ -n "$DOCUMENTA_PORT" ]; then sed -i "s|^DOCUMENTA_PORT=.*|DOCUMENTA_PORT=${PORT}|" .env; fi
+VERSION="$(grep '^DOCUMENTA_VERSION=' .env | cut -d= -f2-)"
 
 chmod -R 777 doc_data   # the containers run as different users
 
@@ -132,10 +156,10 @@ sed -i "s|__DIR__|${DOCUMENTA_DIR}|g; s|__REF__|${DOCUMENTA_REF}|g; s|__RAW__|${
 chmod +x /usr/local/bin/documenta
 
 # ----- run -----
-if [ "$DOCUMENTA_VERSION" = "latest" ]; then
+if [ "$VERSION" = "latest" ]; then
     say "Pulling the latest images (this takes a few minutes the first time)"
 else
-    say "Pulling images for version ${DOCUMENTA_VERSION}"
+    say "Pulling images for version ${VERSION}"
 fi
 docker compose pull
 say "Starting"
@@ -144,7 +168,7 @@ docker image prune -f >/dev/null 2>&1 || true
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 URL="http://${IP:-<server-ip>}"
-[ "$DOCUMENTA_PORT" != "80" ] && URL="${URL}:${DOCUMENTA_PORT}"
+[ "$PORT" != "80" ] && URL="${URL}:${PORT}"
 echo
 say "Documenta is running at ${URL}"
 if [ "$FRESH_INSTALL" = "1" ]; then

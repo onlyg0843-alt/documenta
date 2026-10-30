@@ -10,7 +10,8 @@ port from Windows to it, and registers a startup task so it comes back after a r
 Run the same command again to update (data is kept), or use `documenta update`.
 
 Options, as environment variables set before running:
-    $env:DOCUMENTA_PORT     = '80'            web port on Windows
+    $env:DOCUMENTA_PORT     = '80'            web port on Windows; default 80, or 5075 when 80 is taken
+                                              (e.g. by IIS); kept on re-runs
     $env:DOCUMENTA_DIR      = 'C:\Documenta'  Windows folder for the scripts and the WSL disk
     $env:DOCUMENTA_VERSION  = 'latest'        application version to run, e.g. 1.0.4
 #>
@@ -22,13 +23,14 @@ $Repo      = 'onlyg0843-alt/documenta'
 $Raw       = "https://raw.githubusercontent.com/$Repo/main"
 $Distro    = 'documenta'
 $RootfsUrl = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz'
-$Port      = if ($env:DOCUMENTA_PORT) { [int]$env:DOCUMENTA_PORT } else { 80 }
+$Port      = if ($env:DOCUMENTA_PORT) { [int]$env:DOCUMENTA_PORT } else { 0 }   # 0: decided below
 $Dir       = if ($env:DOCUMENTA_DIR) { $env:DOCUMENTA_DIR } else { 'C:\Documenta' }
 $Version   = if ($env:DOCUMENTA_VERSION) { $env:DOCUMENTA_VERSION } else { 'latest' }
 $TaskName  = 'Documenta'
 
 function Say($msg)  { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Fail($msg) { Write-Host "Error: $msg" -ForegroundColor Red; throw 'Documenta installation stopped.' }
+function Test-PortBusy($p) { [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue) }
 
 function Install-Documenta {
 
@@ -57,8 +59,26 @@ function Install-Documenta {
     try { & wsl.exe --update 2>$null | Out-Null } catch { }   # systemd inside WSL needs a recent version
     & wsl.exe --set-default-version 2 | Out-Null
 
-    # ----- the distro -----
+    # ----- the port -----
+    # Checked only before the first install: afterwards the port is ours (the forwarding rule listens on it).
     New-Item -ItemType Directory -Force -Path "$Dir\wsl" | Out-Null
+    $portFile = "$Dir\port"
+    if ($Port) {
+        if (-not (Test-Path $portFile) -and (Test-PortBusy $Port)) {
+            Fail "Port $Port is already in use on this server. Choose another one: `$env:DOCUMENTA_PORT = '<port>'"
+        }
+    } elseif (Test-Path $portFile) {
+        $Port = [int](Get-Content $portFile)
+    } else {
+        $Port = 80
+        if (Test-PortBusy 80) {
+            Say 'Port 80 is in use by another program (IIS?); using port 5075 instead'
+            $Port = 5075
+            if (Test-PortBusy 5075) { Fail "Ports 80 and 5075 are both in use. Choose another one: `$env:DOCUMENTA_PORT = '<port>'" }
+        }
+    }
+
+    # ----- the distro -----
     $distros = (& wsl.exe -l -q) -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
     $fresh = $distros -notcontains $Distro
     if ($fresh) {
@@ -154,9 +174,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0documenta.ps1" %*
     }
 
     # ----- network: let the server's address reach the app inside WSL -----
-    if (-not (Get-NetFirewallRule -DisplayName 'Documenta' -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName 'Documenta' -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
-    }
+    Set-Content -Path $portFile -Value $Port
+    Remove-NetFirewallRule -DisplayName 'Documenta' -ErrorAction SilentlyContinue   # recreated, in case the port changed
+    New-NetFirewallRule -DisplayName 'Documenta' -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Dir\start.ps1" -NoWait
 
     # ----- start at boot -----

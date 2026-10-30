@@ -22,9 +22,9 @@ Options go in front of the command:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DOCUMENTA_PORT` | `80` | web port |
+| `DOCUMENTA_PORT` | `80`, or `5075` if 80 is already taken | web port; kept on later runs |
 | `DOCUMENTA_DIR` | `/opt/documenta` | install folder |
-| `DOCUMENTA_VERSION` | `latest` | application version to run, e.g. `1.0.4` |
+| `DOCUMENTA_VERSION` | `latest` | application version to run, e.g. `1.0.4`; kept on later runs |
 
 Example with another port:
 
@@ -43,7 +43,7 @@ Documenta runs as Linux containers, so on Windows it lives inside WSL 2 (built i
   irm https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.ps1 | iex
   ```
 
-The installer enables WSL 2 (one reboot the first time, then run it again), creates a Linux environment named `documenta`, installs Docker inside it and then does exactly what the Linux install does. It forwards the chosen port from Windows to the app and registers a startup task; it asks for your Windows password once so the app can start after a reboot without anyone signing in (press Enter to skip, then it starts when you sign in). Options are the same as on Linux, set as `$env:DOCUMENTA_PORT = '8080'` before the command.
+The installer enables WSL 2 (one reboot the first time, then run it again), creates a Linux environment named `documenta`, installs Docker inside it and then does exactly what the Linux install does. It forwards the chosen port from Windows to the app and registers a startup task; it asks for your Windows password once so the app can start after a reboot without anyone signing in (press Enter to skip, then it starts when you sign in). Options are the same as on Linux, set as `$env:DOCUMENTA_PORT = '8080'` before the command. If port 80 is already taken (IIS, for example) and you didn't choose a port, it uses 5075 and says so.
 
 Afterwards `documenta update`, `status`, `logs` and the others work from any new PowerShell or Command Prompt window, plus two Windows-only ones: `documenta backup [file]` exports the whole system including data to a `.tar`, and `documenta uninstall` removes everything.
 
