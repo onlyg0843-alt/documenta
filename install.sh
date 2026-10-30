@@ -164,11 +164,25 @@ say "Starting"
 docker compose up -d --remove-orphans
 docker image prune -f >/dev/null 2>&1 || true
 
+# ----- wait until the app answers: the API needs a moment after the containers start -----
+printf '==> Waiting for Documenta to answer'
+UP=0
+for i in $(seq 1 60); do
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/api/auth/profile" 2>/dev/null || true)"
+    case "$code" in 200|401) UP=1; break ;; esac
+    printf '.'; sleep 3
+done
+echo
+
 IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 URL="http://${IP:-<server-ip>}"
 [ "$PORT" != "80" ] && URL="${URL}:${PORT}"
 echo
-say "Documenta is running at ${URL}"
+if [ "$UP" = "1" ]; then
+    say "Documenta is running at ${URL}"
+else
+    say "Documenta is starting at ${URL} but does not answer yet; check in a minute with: documenta status, documenta logs api"
+fi
 echo "    Login:        superadmin / changeme12345  (on a new installation; you will be asked to change it at first sign-in)"
 echo "    Files:        ${DOCUMENTA_DIR}  (data in doc_data/, settings in .env)"
 echo "    Commands:     documenta update | status | logs | restart | stop | start"

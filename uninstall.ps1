@@ -23,7 +23,7 @@ $path = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 & wsl.exe --terminate documenta 2>$null   # only works for the user who installed; otherwise it stops at the next reboot
 
 # Only what install.ps1 generated is removed here; the setup program's own files are the MSI's to remove
-$generated = 'start.ps1', 'documenta.ps1', 'documenta.cmd', 'port', 'adapter'
+$generated = 'start.ps1', 'start.log', 'documenta.ps1', 'documenta.cmd', 'port', 'adapter'
 if ($Purge) {
     & wsl.exe --unregister documenta 2>$null
     foreach ($f in @('wsl') + $generated) { Remove-Item "$dir\$f" -Recurse -Force -ErrorAction SilentlyContinue }
