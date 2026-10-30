@@ -115,10 +115,132 @@ chmod -R 777 doc_data   # the containers run as different users
 # Written with a quoted heredoc (no expansion here); __DIR__, __REF__ and __RAW__ are filled in below.
 cat > /usr/local/bin/documenta <<'EOF'
 #!/bin/bash
-# Manage the Documenta installation in __DIR__
+# The `documenta` command: manages the Documenta installation in __DIR__.
+# Written by install.sh on every install and update; `documenta help` lists the commands.
 set -e
 cd "__DIR__"
-envval() { grep "^$1=" .env | cut -d= -f2-; }
+envval() { grep "^$1=" .env 2>/dev/null | cut -d= -f2-; }
+
+# On a Windows server this runs inside WSL, called by the Windows `documenta`; a few hints differ there
+ON_WINDOWS=0
+[ -n "${WSL_DISTRO_NAME:-}" ] && ON_WINDOWS=1
+
+show_help() {
+    cat <<'HELP'
+Documenta: shared documents, templates and records, edited in the browser.
+
+Usage: documenta <command> [options]      (run as root, or with sudo)
+
+Commands:
+  update [--force]     Download the newest version and restart. Data, settings and
+                       secrets are kept, and users stay signed in. Refuses while files
+                       are open in the editor; --force updates anyway.
+  status               Show each service and whether it is running.
+  logs [service]       Follow the logs live; Ctrl+C stops following. Without a
+                       service it shows all of them.
+  restart [service]    Restart everything, or one service.
+  stop                 Stop everything. Data is kept.
+  start                Start everything again after a stop.
+  version              Show the installed version and check for a newer one.
+  help                 Show this help.
+
+Services: api (server), frontend (web app), onlyoffice (document editor),
+          telegram-bot, mongodb (database), redis (sign-in sessions).
+
+Examples:
+  documenta logs api                         follow the server's log
+  documenta restart onlyoffice               restart only the document editor
+  DOCUMENTA_VERSION=1.0.5 documenta update   stay on (or go back to) version 1.0.5
+  DOCUMENTA_VERSION=latest documenta update  follow new releases again
+HELP
+    echo
+    echo "Installed in: __DIR__  (data in doc_data/, settings in .env)"
+}
+
+# A service's container (running or stopped), and what its image says about itself
+cid()    { docker compose ps -a -q "$1" 2>/dev/null | head -n 1; }
+label()  { local v; v="$(docker inspect --format "{{index .Config.Labels \"$2\"}}" "$1" 2>/dev/null)"; [ "$v" = "<no value>" ] || printf '%s' "$v"; }
+envof()  { docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null | sed -n "s/^$2=//p" | head -n 1; }
+imgtag() { local v; v="$(docker inspect --format '{{.Config.Image}}' "$1" 2>/dev/null)"; printf '%s' "${v##*:}"; }
+
+# The newest released version in the image registry; empty when it can't be reached
+newest_release() {
+    local image repo token
+    image="$(docker compose config --images 2>/dev/null | grep ':api-' | head -n 1)"
+    repo="${image#ghcr.io/}"; repo="${repo%%:*}"
+    [ -n "$repo" ] || repo="onlyg0843-alt/documenta"
+    token="$(curl -fsS --max-time 5 "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" 2>/dev/null | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+    [ -n "$token" ] || return 0
+    curl -fsS --max-time 5 -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/${repo}/tags/list?n=1000" 2>/dev/null |
+        grep -o '"api-[0-9][0-9.]*"' | tr -d '"' | sed 's/^api-//' | sort -V | tail -n 1
+}
+
+show_version() {
+    if ! docker info >/dev/null 2>&1; then
+        echo "Cannot reach Docker. Run it as root: sudo documenta version" >&2
+        exit 1
+    fi
+    local id ver="" released="" channel newest v running total parts=()
+
+    # The version is read from the running image, since .env usually just says "latest"
+    id="$(cid api)"
+    if [ -n "$id" ]; then
+        ver="$(label "$id" org.opencontainers.image.version)"; ver="${ver#api-}"
+        released="$(label "$id" org.opencontainers.image.created)"; released="${released%%T*}"
+    fi
+    channel="$(envval DOCUMENTA_VERSION)"; channel="${channel:-latest}"
+    [ -n "$ver" ] || ver="$channel"
+    echo "Documenta ${ver}${released:+  (released ${released})}"
+
+    if [ "$channel" = "latest" ]; then
+        echo "  Updates:      follow the newest release"
+    else
+        echo "  Updates:      pinned to ${channel}; documenta update stays on it"
+    fi
+
+    newest="$(newest_release)"
+    if [ -z "$newest" ]; then
+        echo "  Newest:       could not check (no internet access?)"
+    elif [ "$newest" = "$ver" ]; then
+        echo "  Newest:       ${newest}, you are up to date"
+    elif [ "$(printf '%s\n%s\n' "$ver" "$newest" | sort -V | tail -n 1)" = "$newest" ]; then
+        if [ "$channel" = "latest" ]; then
+            echo "  Newest:       ${newest} is available: run documenta update"
+        elif [ "$ON_WINDOWS" = 1 ]; then
+            echo "  Newest:       ${newest} is available; to move to it, run the installer again after \$env:DOCUMENTA_VERSION = 'latest'"
+        else
+            echo "  Newest:       ${newest} is available; to move to it: DOCUMENTA_VERSION=latest documenta update"
+        fi
+    else
+        echo "  Newest:       ${newest}"
+    fi
+
+    id="$(cid onlyoffice)"
+    if [ -n "$id" ]; then   # its image has no version label; the installed package knows
+        v="$(docker compose exec -T onlyoffice dpkg-query -W -f='${Version}' onlyoffice-documentserver 2>/dev/null || true)"
+        parts+=("ONLYOFFICE ${v:-$(imgtag "$id")}")
+    fi
+    id="$(cid mongodb)"; if [ -n "$id" ]; then v="$(envof "$id" MONGO_VERSION)"; parts+=("MongoDB ${v:-$(imgtag "$id")}"); fi
+    id="$(cid redis)";   if [ -n "$id" ]; then v="$(envof "$id" REDIS_VERSION)"; parts+=("Redis ${v:-$(imgtag "$id")}"); fi
+    if [ "${#parts[@]}" -gt 0 ]; then
+        v="$(printf '%s, ' "${parts[@]}")"
+        echo "  Components:   ${v%, }"
+    fi
+
+    running="$(docker compose ps -q --status running 2>/dev/null | wc -l)"
+    total="$(docker compose config --services 2>/dev/null | wc -l)"
+    if [ "$running" -lt "$total" ]; then
+        echo "  Running:      ${running} of ${total} services; documenta status shows which"
+    else
+        echo "  Running:      all ${total} services"
+    fi
+
+    if [ "$ON_WINDOWS" = 1 ]; then
+        echo "  Linux folder: __DIR__  (inside the WSL environment '${WSL_DISTRO_NAME}')"
+    else
+        echo "  Installed in: __DIR__"
+    fi
+}
 
 # How many files are open in the editor right now: documents being edited, templates and records
 # locked by ONLYOFFICE. Updating restarts containers, which would interrupt them.
@@ -128,7 +250,7 @@ open_editors() {
         2>/dev/null | tr -d '[:space:]'
 }
 
-case "${1:-}" in
+case "${1:-help}" in
     update)
         if [ "${2:-}" != "--force" ]; then
             open="$(open_editors || true)"
@@ -147,7 +269,9 @@ case "${1:-}" in
     restart) docker compose restart "${@:2}" ;;
     stop)    docker compose down ;;
     start)   docker compose up -d ;;
-    *)       echo "Usage: documenta update [--force]|status|logs [service]|restart [service]|stop|start"; exit 1 ;;
+    version|--version|-v) show_version ;;
+    help|--help|-h)       show_help ;;
+    *)       { echo "Unknown command: $1"; echo; show_help; } >&2; exit 1 ;;
 esac
 EOF
 sed -i "s|__DIR__|${DOCUMENTA_DIR}|g; s|__REF__|${DOCUMENTA_REF}|g; s|__RAW__|${RAW}|g" /usr/local/bin/documenta
@@ -185,5 +309,4 @@ else
 fi
 echo "    Login:        superadmin / changeme12345  (on a new installation; you will be asked to change it at first sign-in)"
 echo "    Files:        ${DOCUMENTA_DIR}  (data in doc_data/, settings in .env)"
-echo "    Commands:     documenta update | status | logs | restart | stop | start"
-echo "                  (update refuses while files are open in the editor; add --force to override)"
+echo "    Commands:     documenta help   lists them all: update, status, logs, restart, stop, start, version"

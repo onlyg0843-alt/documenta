@@ -49,7 +49,7 @@ Running the installer again updates Documenta, which restarts its services for a
 
 For developers: the setup program's logo images (`windows/msi/banner.bmp`, `dialog.bmp`, `documenta.ico`) are rendered from the app's `frontend/public/documenta_icon.svg` (SVG → 512 px PNG with `sharp`, then drawn onto white with System.Drawing); regenerate them if the logo changes.
 
-Afterwards `documenta update`, `status`, `logs` and the others work from any new PowerShell or Command Prompt window, plus two Windows-only ones: `documenta backup [file]` exports the whole system including data to a `.tar` (in your Documents folder unless you name a file), and `documenta uninstall` removes everything.
+Afterwards `documenta update`, `status`, `logs`, `version` and the others work from any new PowerShell or Command Prompt window, and `documenta help` lists them all. On Windows, `documenta version` also shows the address, whether the startup task is running, and the setup program's version. Two commands are Windows-only: `documenta backup [file]` exports the whole system including data to a `.tar` (in your Documents folder unless you name a file), and `documenta uninstall` removes everything.
 
 **Uninstalling on Windows:** "Documenta" in Apps & features (the setup program) stops Documenta and removes the program parts but keeps the data, in the WSL distro `documenta` under `C:\Program Files\Documenta\wsl`; it tells you so. `documenta uninstall` (in a window started as Administrator) removes the data as well; if you used the setup program, remove "Documenta" from Apps & features afterwards too.
 
@@ -69,6 +69,10 @@ Other commands:
 | `documenta logs [service]` | follows the logs (`api`, `frontend`, `onlyoffice`, `telegram-bot`, `mongodb`, `redis`) |
 | `documenta restart [service]` | restarts everything or one service |
 | `documenta stop` / `documenta start` | stops / starts everything |
+| `documenta version` | shows the running version, its release date and the components' versions, and checks whether a newer release exists |
+| `documenta help` | lists every command with what it does |
+
+To stay on one version, or go back to it: `DOCUMENTA_VERSION=1.0.5 documenta update`. To follow new releases again: `DOCUMENTA_VERSION=latest documenta update`.
 
 **Installed earlier from the archive (`Documenta-Deployment.tar.gz`)?** Run the installer with `DOCUMENTA_DIR` pointing at that folder, for example `DOCUMENTA_DIR=/root/documenta bash <(curl -fsSL https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.sh)`. Your `.env` and data are kept. From then on use `documenta update`.
 

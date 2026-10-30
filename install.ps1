@@ -13,7 +13,8 @@ Options, as environment variables set before running:
     $env:DOCUMENTA_PORT     = '80'            web port on Windows; default 80, or 5075 when 80 is taken
                                               (e.g. by IIS); kept on re-runs
     $env:DOCUMENTA_DIR      = 'C:\Program Files\Documenta'   folder for the scripts and the WSL disk
-    $env:DOCUMENTA_VERSION  = 'latest'        application version to run, e.g. 1.0.4
+    $env:DOCUMENTA_VERSION  = 'latest'        application version to run, e.g. 1.0.5, or latest to follow
+                                              new releases; kept on re-runs
 #>
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is much faster without the progress bar
@@ -26,7 +27,7 @@ $RootfsUrl = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-
 $Port      = if ($env:DOCUMENTA_PORT) { [int]$env:DOCUMENTA_PORT } else { 0 }   # 0: decided below
 $ProgFiles = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }   # the 64-bit one, even from a 32-bit PowerShell
 $Dir       = if ($env:DOCUMENTA_DIR) { $env:DOCUMENTA_DIR } else { "$ProgFiles\Documenta" }   # the folder the setup program (MSI) uses too
-$Version   = if ($env:DOCUMENTA_VERSION) { $env:DOCUMENTA_VERSION } else { 'latest' }
+$Version   = $env:DOCUMENTA_VERSION   # empty: keep the installed version (latest on a new install)
 $TaskName  = 'Documenta'
 
 function Say($msg)  { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -189,7 +190,9 @@ function Install-Documenta {
     # ----- the Linux installer, inside the distro -----
     Say 'Running the Linux installer inside WSL (several minutes the first time: Docker and the images are downloaded)'
     & wsl.exe -d $Distro -u root -- bash -c 'apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq curl ca-certificates >/dev/null 2>&1'
-    & wsl.exe -d $Distro -u root -- bash -c "curl -fsSL $Raw/install.sh | DOCUMENTA_DIR=/opt/documenta DOCUMENTA_PORT=$Port DOCUMENTA_VERSION=$Version bash"
+    # The version is only passed when asked for; otherwise install.sh keeps the installed one (latest on a new install)
+    $versionEnv = if ($Version) { "DOCUMENTA_VERSION=$Version " } else { '' }
+    & wsl.exe -d $Distro -u root -- bash -c "curl -fsSL $Raw/install.sh | DOCUMENTA_DIR=/opt/documenta DOCUMENTA_PORT=$Port ${versionEnv}bash"
     if ($LASTEXITCODE -ne 0) { Fail 'The Linux installer failed; see the messages above.' }
 
     # ----- helper scripts on Windows -----
@@ -236,11 +239,80 @@ while ($true) {
         Set-Content -Path "$Dir\start.ps1" -Encoding UTF8
 
     @'
-# Windows-side commands of `documenta`; everything else is passed to the Linux `documenta` inside WSL.
-param([string]$Command, [string]$Arg)
+# Windows side of the `documenta` command. documenta.cmd sends help, version, start, backup, ip and
+# uninstall here; everything else goes straight to the Linux `documenta` inside WSL.
+# Arguments are read by position: as named parameters, PowerShell would swallow ones like --purge.
+$Command = [string]$args[0]; $Arg = [string]$args[1]
 $env:WSL_UTF8 = '1'
 $distro = '__DISTRO__'; $dir = '__DIR__'; $port = __PORT__; $task = '__TASK__'
+
+function Show-Help {
+    @"
+Documenta: shared documents, templates and records, edited in the browser.
+On this server it runs inside WSL 2, in the Linux environment '$distro'.
+
+Usage: documenta <command> [options]
+
+Commands:
+  update [--force]      Download the newest version and restart. Data, settings and
+                        secrets are kept, and users stay signed in. Refuses while files
+                        are open in the editor; --force updates anyway.
+  status                Show each service and whether it is running.
+  logs [service]        Follow the logs live; Ctrl+C stops following. Without a
+                        service it shows all of them.
+  restart [service]     Restart everything, or one service.
+  stop                  Stop everything. Data is kept.
+  start                 Start everything again, with the startup task that keeps it running.
+  version               Show the installed version and address, and check for a newer one.
+  backup [file]         Export the whole system, data included, to a .tar file
+                        (default: your Documents folder).
+  ip                    Show the internal address of the Linux environment.
+  uninstall [--purge]   Remove Documenta and ALL its data; asks first, --purge doesn't.
+                        Needs a window started as Administrator.
+  help                  Show this help.
+
+Services: api (server), frontend (web app), onlyoffice (document editor),
+          telegram-bot, mongodb (database), redis (sign-in sessions).
+
+Examples:
+  documenta logs api            follow the server's log
+  documenta restart onlyoffice  restart only the document editor
+
+Installed in: $dir
+Startup log:  $dir\start.log
+"@
+}
+
+# The distro belongs to the Windows account that installed Documenta; other accounts can't see it
+function Test-Distro {
+    if ((& wsl.exe -l -q 2>$null) -replace "`0", '' | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $distro }) { return $true }
+    $owner = (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).Principal.UserId
+    Write-Host "The Linux environment '$distro' was not found for $env:USERDOMAIN\$env:USERNAME." -ForegroundColor Yellow
+    if ($owner) { Write-Host "It belongs to the account that installed Documenta ($owner); run documenta as that account." }
+    else { Write-Host 'Run the installer ("Install or update Documenta" in the Start Menu) to set it up.' }
+    return $false
+}
+
+function Show-Version {
+    if (-not (Test-Distro)) { exit 1 }
+    & wsl.exe -d $distro -u root -- documenta version
+    $name = if (Test-Path "$dir\adapter") { Get-Content "$dir\adapter" -TotalCount 1 }
+    $ip = if ($name) { (Get-NetIPAddress -InterfaceAlias $name -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress }
+    if (-not $ip) { $ip = $env:COMPUTERNAME }
+    Write-Host "  Address:      http://$ip$(if ($port -ne 80) { ":$port" })"
+    $state = (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).State
+    $taskText = if ($state -eq 'Running') { 'running (it keeps Documenta up)' }
+                elseif ($state) { "$($state), not running: Documenta stops without it; documenta start fixes it" }
+                else { 'not found: run the installer again' }
+    Write-Host "  Startup task: $taskText"
+    $setup = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -eq 'Documenta' } | Select-Object -First 1
+    Write-Host "  Windows:      $dir$(if ($setup) { "  (setup program $($setup.DisplayVersion))" })"
+}
+
 switch ($Command) {
+    { $_ -in '', 'help', '-h', '--help' } { Show-Help; break }
+    { $_ -in 'version', '-v', '--version' } { Show-Version; break }
     'start' {
         # The startup task keeps the distro alive; without it WSL stops the distro a minute after the last command
         if ((Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).State -ne 'Running') {
@@ -277,21 +349,22 @@ switch ($Command) {
         Write-Host 'Documenta and all its data have been removed.'
         if (Test-Path "$dir\uninstall.ps1") { Write-Host 'The setup program is still listed in Apps & features; remove "Documenta" there as well.' }
     }
-    default { Write-Host 'Usage: documenta start | backup [file] | ip | uninstall [--purge]' }
+    default { Write-Host "Unknown command: $Command"; Write-Host ''; Show-Help; exit 1 }
 }
 '@ -replace '__TASK__', $TaskName -replace '__DISTRO__', $Distro -replace '__PORT__', $Port -replace '__DIR__', $Dir |
         Set-Content -Path "$Dir\documenta.ps1" -Encoding UTF8
 
     @"
 @echo off
-if /I "%~1"=="start" goto windows
-if /I "%~1"=="backup" goto windows
-if /I "%~1"=="ip" goto windows
-if /I "%~1"=="uninstall" goto windows
+rem The ``documenta`` command on Windows. help, version and the Windows-only commands are handled by
+rem documenta.ps1 next to this file; everything else goes to the Linux ``documenta`` inside WSL.
+if "%~1"=="" goto windows
+for %%c in (help -h --help version -v --version start backup ip uninstall) do if /I "%~1"=="%%c" goto windows
 wsl.exe -d $Distro -u root -- documenta %*
 exit /b %ERRORLEVEL%
 :windows
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0documenta.ps1" %*
+exit /b %ERRORLEVEL%
 "@ | Set-Content -Path "$Dir\documenta.cmd" -Encoding ASCII
 
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
@@ -354,7 +427,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0documenta.ps1" %*
     if ($adapter) { Write-Host "    Network:      $($adapter.Name) ($($adapter.Description)); the app answers on every address of this server" }
     Write-Host '    Login:        superadmin / changeme12345  (on a new installation; you will be asked to change it at first sign-in)'
     Write-Host "    Files:        $Dir  (the app and its data live in the WSL distro '$Distro')"
-    Write-Host '    Commands:     documenta update | status | logs | restart | stop | start | backup | uninstall'
+    Write-Host '    Commands:     documenta help   lists them all: update, status, logs, version, backup, uninstall, ...'
     Write-Host '                  (open a new PowerShell window first, so the command is on the PATH)'
 }
 
