@@ -12,7 +12,7 @@ Run the same command again to update (data is kept), or use `documenta update`.
 Options, as environment variables set before running:
     $env:DOCUMENTA_PORT     = '80'            web port on Windows; default 80, or 5075 when 80 is taken
                                               (e.g. by IIS); kept on re-runs
-    $env:DOCUMENTA_DIR      = 'C:\Documenta'  Windows folder for the scripts and the WSL disk
+    $env:DOCUMENTA_DIR      = 'C:\Program Files\Documenta'   folder for the scripts and the WSL disk
     $env:DOCUMENTA_VERSION  = 'latest'        application version to run, e.g. 1.0.4
 #>
 $ErrorActionPreference = 'Stop'
@@ -24,7 +24,8 @@ $Raw       = "https://raw.githubusercontent.com/$Repo/main"
 $Distro    = 'documenta'
 $RootfsUrl = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz'
 $Port      = if ($env:DOCUMENTA_PORT) { [int]$env:DOCUMENTA_PORT } else { 0 }   # 0: decided below
-$Dir       = if ($env:DOCUMENTA_DIR) { $env:DOCUMENTA_DIR } else { 'C:\Documenta' }
+$ProgFiles = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }   # the 64-bit one, even from a 32-bit PowerShell
+$Dir       = if ($env:DOCUMENTA_DIR) { $env:DOCUMENTA_DIR } else { "$ProgFiles\Documenta" }   # the folder the setup program (MSI) uses too
 $Version   = if ($env:DOCUMENTA_VERSION) { $env:DOCUMENTA_VERSION } else { 'latest' }
 $TaskName  = 'Documenta'
 
@@ -200,13 +201,15 @@ param([string]`$Command, [string]`$Arg)
 `$distro = '$Distro'; `$dir = '$Dir'; `$port = $Port; `$task = '$TaskName'
 switch (`$Command) {
     'backup' {
-        `$file = if (`$Arg) { `$Arg } else { Join-Path `$dir ("documenta-backup-{0:yyyy-MM-dd}.tar" -f (Get-Date)) }
+        `$file = if (`$Arg) { `$Arg } else { Join-Path ([Environment]::GetFolderPath('MyDocuments')) ("documenta-backup-{0:yyyy-MM-dd}.tar" -f (Get-Date)) }
         Write-Host "Exporting the whole Documenta system (data included) to `$file ..."
         & wsl.exe --export `$distro `$file
-        Write-Host 'Done. Restore on another Windows server with: wsl --import documenta C:\Documenta\wsl <file>, then run install.ps1.'
+        Write-Host 'Done. Restore on another Windows server with: wsl --import documenta "$Dir\wsl" <file>, then run install.ps1.'
     }
     'ip' { ((& wsl.exe -d `$distro -u root -- hostname -I) -join ' ').Trim() }
     'uninstall' {
+        `$id = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+        if (-not `$id.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'Run this in a window started as Administrator.'; return }
         if (`$Arg -ne '--purge') {
             `$answer = Read-Host 'This removes Documenta AND ALL ITS DATA from this server. Type yes to continue'
             if (`$answer -ne 'yes') { return }
@@ -218,8 +221,12 @@ switch (`$Command) {
         & wsl.exe --unregister `$distro
         `$path = [Environment]::GetEnvironmentVariable('Path', 'Machine')
         [Environment]::SetEnvironmentVariable('Path', ((`$path -split ';' | Where-Object { `$_ -and `$_ -ne `$dir }) -join ';'), 'Machine')
-        Remove-Item -Recurse -Force `$dir
-        Write-Host 'Documenta has been removed.'
+        # Only what the installer created; the setup program's own files (if it was used) are removed from Apps & features
+        foreach (`$f in 'wsl', 'start.ps1', 'documenta.cmd', 'port', 'adapter', 'documenta.ps1') { Remove-Item "`$dir\`$f" -Recurse -Force -ErrorAction SilentlyContinue }
+        Remove-Item -Recurse 'HKLM:\SOFTWARE\Documenta' -ErrorAction SilentlyContinue
+        if (-not (Get-ChildItem `$dir -Force -ErrorAction SilentlyContinue)) { Remove-Item `$dir -Force -ErrorAction SilentlyContinue }
+        Write-Host 'Documenta and all its data have been removed.'
+        if (Test-Path "`$dir\uninstall.ps1") { Write-Host 'The setup program is still listed in Apps & features; remove "Documenta" there as well.' }
     }
     default { Write-Host 'Usage: documenta backup [file] | ip | uninstall [--purge]' }
 }
@@ -274,7 +281,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0documenta.ps1" %*
     Write-Host ''
     Say "Documenta is running at $url"
     if ($adapter) { Write-Host "    Network:      $($adapter.Name) ($($adapter.Description)); the app answers on every address of this server" }
-    if ($fresh) { Write-Host '    First login:  superadmin / changeme12345  (you will be asked to change it)' }
+    Write-Host '    Login:        superadmin / changeme12345  (on a new installation; you will be asked to change it at first sign-in)'
     Write-Host "    Files:        $Dir  (the app and its data live in the WSL distro '$Distro')"
     Write-Host '    Commands:     documenta update | status | logs | restart | stop | start | backup | uninstall'
     Write-Host '                  (open a new PowerShell window first, so the command is on the PATH)'

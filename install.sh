@@ -61,8 +61,6 @@ systemctl enable --now docker >/dev/null 2>&1 || true
 # ----- files -----
 mkdir -p "$DOCUMENTA_DIR/doc_data/db" "$DOCUMENTA_DIR/doc_data/redis" "$DOCUMENTA_DIR/doc_data/backend"
 cd "$DOCUMENTA_DIR"
-FRESH_INSTALL=0
-[ -n "$(ls -A doc_data/db 2>/dev/null)" ] || FRESH_INSTALL=1
 
 say "Fetching docker-compose.yml (${DOCUMENTA_REF})"
 curl -fsSL "${RAW}/docker-compose.yml" -o docker-compose.yml.new
@@ -171,9 +169,7 @@ URL="http://${IP:-<server-ip>}"
 [ "$PORT" != "80" ] && URL="${URL}:${PORT}"
 echo
 say "Documenta is running at ${URL}"
-if [ "$FRESH_INSTALL" = "1" ]; then
-    echo "    First login:  superadmin / changeme12345  (you will be asked to change it)"
-fi
+echo "    Login:        superadmin / changeme12345  (on a new installation; you will be asked to change it at first sign-in)"
 echo "    Files:        ${DOCUMENTA_DIR}  (data in doc_data/, settings in .env)"
 echo "    Commands:     documenta update | status | logs | restart | stop | start"
 echo "                  (update refuses while files are open in the editor; add --force to override)"

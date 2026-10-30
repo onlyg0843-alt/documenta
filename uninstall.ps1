@@ -11,7 +11,7 @@ $env:WSL_UTF8 = '1'
 
 $reg  = 'HKLM:\SOFTWARE\Documenta'
 $info = Get-ItemProperty $reg -ErrorAction SilentlyContinue
-$dir  = if ($info.Dir) { $info.Dir } else { 'C:\Documenta' }
+$dir  = if ($info.Dir) { $info.Dir } else { "$env:ProgramFiles\Documenta" }
 $port = if ($info.Port) { $info.Port } elseif (Test-Path "$dir\port") { Get-Content "$dir\port" -First 1 } else { $null }
 
 Stop-ScheduledTask -TaskName 'Documenta' -ErrorAction SilentlyContinue
@@ -22,13 +22,16 @@ $path = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 [Environment]::SetEnvironmentVariable('Path', (($path -split ';' | Where-Object { $_ -and $_ -ne $dir }) -join ';'), 'Machine')
 & wsl.exe --terminate documenta 2>$null   # only works for the user who installed; otherwise it stops at the next reboot
 
+# Only what install.ps1 generated is removed here; the setup program's own files are the MSI's to remove
+$generated = 'start.ps1', 'documenta.ps1', 'documenta.cmd', 'port', 'adapter'
 if ($Purge) {
     & wsl.exe --unregister documenta 2>$null
-    Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+    foreach ($f in @('wsl') + $generated) { Remove-Item "$dir\$f" -Recurse -Force -ErrorAction SilentlyContinue }
     Remove-Item -Recurse $reg -ErrorAction SilentlyContinue
+    if (-not (Get-ChildItem $dir -Force -ErrorAction SilentlyContinue)) { Remove-Item $dir -Force -ErrorAction SilentlyContinue }
     Write-Host 'Documenta and all its data have been removed from this server.'
 } else {
-    Get-ChildItem $dir -File -ErrorAction SilentlyContinue | Remove-Item -Force   # scripts; the wsl\ data disk stays
+    foreach ($f in $generated) { Remove-Item "$dir\$f" -Force -ErrorAction SilentlyContinue }   # the wsl\ data disk stays
     Write-Host "Documenta is stopped and removed. Its data is kept in the WSL distro 'documenta' ($dir\wsl)."
     Write-Host 'To delete the data as well: wsl --unregister documenta'
 }
