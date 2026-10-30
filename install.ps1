@@ -61,20 +61,37 @@ function Select-Adapter($dir) {
         $kind = if ($candidates[$i].Virtual) { 'virtual' } else { 'physical' }
         Write-Host ("  {0})  {1,-16} {2}  ({3}, {4})" -f $i, $candidates[$i].IP, $candidates[$i].Name, $candidates[$i].Description, $kind)
     }
-    Write-Host "Press the number (20 seconds, then 0 is used): " -NoNewline
     $choice = $null
-    try {
+    $canPoll = $true
+    try { $null = $Host.UI.RawUI.KeyAvailable } catch { $canPoll = $false }
+    if ($canPoll) {
+        # Single key press, with a visible countdown
         $deadline = (Get-Date).AddSeconds(20)
+        $shown = -1
         while ((Get-Date) -lt $deadline) {
-            if ([Console]::KeyAvailable) {
-                $key = [Console]::ReadKey($true)
-                if ($key.KeyChar -match '^\d$' -and [int]$key.KeyChar -lt $candidates.Count) { $choice = [int]$key.KeyChar; break }
+            $left = [int][math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
+            if ($left -ne $shown) {
+                Write-Host ("`rPress the number ({0,2} s left, then 0 is used): " -f $left) -NoNewline
+                $shown = $left
             }
-            Start-Sleep -Milliseconds 200
+            try {
+                if ($Host.UI.RawUI.KeyAvailable) {
+                    $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                    $char = [string]$key.Character
+                    if ($char -match '^\d$' -and [int]$char -lt $candidates.Count) { $choice = [int]$char; break }
+                }
+            } catch { $canPoll = $false; break }
+            Start-Sleep -Milliseconds 100
         }
-    } catch { }   # no interactive console: use the default
+        Write-Host ''
+    }
+    if (-not $canPoll) {
+        # No live key reading in this window (input redirected): a normal answer, waiting as long as needed
+        $answer = Read-Host 'Type the number and press Enter'
+        if ($answer -match '^\d+$' -and [int]$answer -lt $candidates.Count) { $choice = [int]$answer }
+    }
     if ($null -eq $choice) { $choice = 0 }
-    Write-Host $choice
+    Write-Host "Using adapter $choice ($($candidates[$choice].IP), $($candidates[$choice].Name))"
     Set-Content -Path $savedFile -Value $candidates[$choice].Name
     return $candidates[$choice]
 }
