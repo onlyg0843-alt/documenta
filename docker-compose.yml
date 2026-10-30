@@ -19,7 +19,7 @@ services:
       - internal-local-nw
 
   mongodb:
-    image: mongo:latest
+    image: mongo:9   # pinned major: MongoDB upgrades one major at a time, so bump this deliberately in a release
     container_name: doc_mongodb
     restart: unless-stopped
     expose:
