@@ -2,8 +2,9 @@
 <!--
   Documenta Setup for Windows Server. The MSI only delivers install.ps1 and a Start Menu entry:
   the real work (WSL 2, the Ubuntu distro, Docker, the app) happens in install.ps1, in a visible
-  PowerShell window, because it downloads gigabytes and may need a reboot. The MSI's own uninstall
-  removes just these files; `documenta uninstall` removes the app and its data.
+  PowerShell window, because it downloads gigabytes and may need a reboot. The MSI's Uninstall runs
+  uninstall.ps1, which stops and removes Documenta but keeps its data; `documenta uninstall` or
+  uninstall.ps1 -Purge removes the data as well.
   Built by ../../.github/workflows/msi.yml with WiX 5: wix build -d Version=1.2.0 ...
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
@@ -22,6 +23,9 @@
     <ComponentGroup Id="Files">
       <Component Directory="INSTALLFOLDER">
         <File Id="InstallPs1" Source="..\..\install.ps1" />
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Id="UninstallPs1" Source="..\..\uninstall.ps1" />
       </Component>
       <Component Directory="INSTALLFOLDER">
         <File Id="ReadmeMd" Source="..\..\README.md" />
@@ -45,6 +49,14 @@
     <CustomAction Id="LaunchInstaller" Directory="INSTALLFOLDER"
                   ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -NoExit -File &quot;[INSTALLFOLDER]install.ps1&quot;"
                   Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
+
+    <!-- Uninstall (not upgrade): stop and remove Documenta, keep its data. Runs elevated, before the files go. -->
+    <CustomAction Id="StopDocumenta" Directory="INSTALLFOLDER"
+                  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]uninstall.ps1&quot;"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="StopDocumenta" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
 
     <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />

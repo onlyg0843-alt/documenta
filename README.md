@@ -47,6 +47,8 @@ The installer enables WSL 2 (one reboot the first time, then run it again), crea
 
 Afterwards `documenta update`, `status`, `logs` and the others work from any new PowerShell or Command Prompt window, plus two Windows-only ones: `documenta backup [file]` exports the whole system including data to a `.tar`, and `documenta uninstall` removes everything.
 
+**Uninstalling on Windows:** "Documenta" in Apps & features (the MSI) stops Documenta and removes the program parts but keeps the data, in the WSL distro `documenta`; it tells you so. `documenta uninstall` removes the data as well.
+
 ## Update
 
 ```bash

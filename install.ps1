@@ -216,6 +216,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0documenta.ps1" %*
 
     # ----- network: let the server's address reach the app inside WSL -----
     Set-Content -Path $portFile -Value $Port
+    # Where things are, for uninstall.ps1 (the MSI's Uninstall) which may run as another account
+    New-Item -Path 'HKLM:\SOFTWARE\Documenta' -Force | Out-Null
+    Set-ItemProperty -Path 'HKLM:\SOFTWARE\Documenta' -Name 'Dir' -Value $Dir
+    Set-ItemProperty -Path 'HKLM:\SOFTWARE\Documenta' -Name 'Port' -Value $Port
     Remove-NetFirewallRule -DisplayName 'Documenta' -ErrorAction SilentlyContinue   # recreated, in case the port changed
     New-NetFirewallRule -DisplayName 'Documenta' -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Dir\start.ps1" -NoWait
