@@ -45,7 +45,7 @@ Documenta runs as Linux containers, so on Windows it lives inside WSL 2 (built i
 
 The installer enables WSL 2 (one reboot the first time, then run it again), creates a Linux environment named `documenta`, installs Docker inside it and then does exactly what the Linux install does. It forwards the chosen port from Windows to the app and registers a startup task; it asks for your Windows password once so the app can start after a reboot without anyone signing in (press Enter to skip, then it starts when you sign in). Options are the same as on Linux, set as `$env:DOCUMENTA_PORT = '8080'` before the command. If port 80 is already taken (IIS, for example) and you didn't choose a port, it uses 5075 and says so. If the server has several network adapters, the installer lists them right at the start and waits 20 seconds for you to pick the one people will use; otherwise it takes the first physical one. The app is reachable on every address of the server either way; the choice only decides which address is shown.
 
-For developers: the setup program's logo images (`windows/msi/banner.bmp`, `dialog.bmp`, `documenta.ico`) are rendered from the app icon; regenerate them if the logo changes.
+For developers: the setup program's logo images (`windows/msi/banner.bmp`, `dialog.bmp`, `documenta.ico`) are rendered from the app's `frontend/public/documenta_icon.svg` (SVG → 512 px PNG with `sharp`, then drawn onto white with System.Drawing); regenerate them if the logo changes.
 
 Afterwards `documenta update`, `status`, `logs` and the others work from any new PowerShell or Command Prompt window, plus two Windows-only ones: `documenta backup [file]` exports the whole system including data to a `.tar`, and `documenta uninstall` removes everything.
 
