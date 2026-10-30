@@ -61,6 +61,8 @@ systemctl enable --now docker >/dev/null 2>&1 || true
 # ----- files -----
 mkdir -p "$DOCUMENTA_DIR/doc_data/db" "$DOCUMENTA_DIR/doc_data/redis" "$DOCUMENTA_DIR/doc_data/backend"
 cd "$DOCUMENTA_DIR"
+FRESH_INSTALL=0   # an empty database folder: only a fallback for showing the login, see the end
+[ -n "$(ls -A doc_data/db 2>/dev/null)" ] || FRESH_INSTALL=1
 
 say "Fetching docker-compose.yml (${DOCUMENTA_REF})"
 curl -fsSL "${RAW}/docker-compose.yml" -o docker-compose.yml.new
@@ -307,6 +309,19 @@ if [ "$UP" = "1" ]; then
 else
     say "Documenta is starting at ${URL} but does not answer yet; check in a minute with: documenta status, documenta logs api"
 fi
-echo "    Login:        superadmin / changeme12345  (on a new installation; you will be asked to change it at first sign-in)"
+# The default login is shown only while it is still in use: the server creates superadmin / changeme12345
+# on first start and marks the account until someone sets a new password. If the database can't be asked,
+# it is shown on a new installation. (install.ps1 makes the same check for its own summary.)
+ACCOUNT="$(docker compose exec -T mongodb mongosh --quiet "$(grep '^DB_NAME=' .env | cut -d= -f2-)" --eval \
+    'const u = db.users.findOne({username: "superadmin"}); print(u ? (u.mustChangePassword ? "default" : "changed") : "none")' \
+    2>/dev/null | tr -d '[:space:]' || true)"
+case "$ACCOUNT" in
+    default) SHOW_LOGIN=1 ;;
+    changed) SHOW_LOGIN=0 ;;
+    *)       SHOW_LOGIN="$FRESH_INSTALL" ;;
+esac
+if [ "$SHOW_LOGIN" = "1" ]; then
+    echo "    Login:        superadmin / changeme12345  (you will be asked to change it at first sign-in)"
+fi
 echo "    Files:        ${DOCUMENTA_DIR}  (data in doc_data/, settings in .env)"
 echo "    Commands:     documenta help   lists them all: update, status, logs, restart, stop, start, version"

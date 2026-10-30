@@ -14,7 +14,7 @@ Shared documents, fill-in templates and bulk records, edited in the browser with
 curl -fsSL https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.sh | sudo bash
 ```
 
-The command installs Docker if it's missing, puts everything in `/opt/documenta`, generates this installation's secrets, downloads the application and starts it. The first run takes a few minutes, mostly for the document server download. At the end it prints the address and the first login: `superadmin` / `changeme12345`, which you must change on first sign-in.
+The command installs Docker if it's missing, puts everything in `/opt/documenta`, generates this installation's secrets, downloads the application and starts it. The first run takes a few minutes, mostly for the document server download. At the end it prints the address and the first login: `superadmin` / `changeme12345`, which you must change on first sign-in. The login is printed only until that password has been changed, so later updates don't show it.
 
 Then, signed in as superadmin, open the settings pages to set up ONLYOFFICE and upload your license, and optionally the Telegram page to connect your team's groups.
 

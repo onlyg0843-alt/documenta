@@ -425,7 +425,14 @@ exit /b %ERRORLEVEL%
     }
     if ($taskState -ne 'Running') { Write-Host "    Warning: the '$TaskName' startup task is not running (state: $taskState); see $Dir\start.log" -ForegroundColor Yellow }
     if ($adapter) { Write-Host "    Network:      $($adapter.Name) ($($adapter.Description)); the app answers on every address of this server" }
-    Write-Host '    Login:        superadmin / changeme12345  (on a new installation; you will be asked to change it at first sign-in)'
+    # The default login only while it is still in use, the same check as at the end of install.sh: the server
+    # marks superadmin until someone sets a new password. If the database can't be asked: on a new installation.
+    # The check goes in base64 so that no quoting survives the trip through wsl.exe and bash -c.
+    $check = 'cd /opt/documenta && docker compose exec -T mongodb mongosh --quiet "$(grep ''^DB_NAME='' .env | cut -d= -f2-)" --eval ''const u = db.users.findOne({username: "superadmin"}); print(u ? (u.mustChangePassword ? "default" : "changed") : "none")'''
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($check))
+    $account = ((& wsl.exe -d $Distro -u root -- bash -c "echo $b64 | base64 -d | bash" 2>$null) -join '').Trim()
+    $showLogin = if ($account -eq 'default') { $true } elseif ($account -eq 'changed') { $false } else { $fresh }
+    if ($showLogin) { Write-Host '    Login:        superadmin / changeme12345  (you will be asked to change it at first sign-in)' }
     Write-Host "    Files:        $Dir  (the app and its data live in the WSL distro '$Distro')"
     Write-Host '    Commands:     documenta help   lists them all: update, status, logs, version, backup, uninstall, ...'
     Write-Host '                  (open a new PowerShell window first, so the command is on the PATH)'
