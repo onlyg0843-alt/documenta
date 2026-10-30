@@ -69,10 +69,12 @@ function Install-Documenta {
         & wsl.exe --import $Distro "$Dir\wsl" $tar --version 2
         if ($LASTEXITCODE -ne 0) { Fail 'wsl --import failed.' }
         Remove-Item $tar -Force
-        # systemd starts Docker and the containers whenever the distro boots; root is its only user
-        & wsl.exe -d $Distro -u root -- bash -c "printf '[boot]\nsystemd=true\n[user]\ndefault=root\n' > /etc/wsl.conf"
-        & wsl.exe --terminate $Distro
     }
+    # systemd starts Docker and the containers whenever the distro boots; root is its only user; and Windows
+    # programs stay out of the Linux PATH, so a docker.exe on Windows can't be mistaken for Docker inside.
+    # Written on every run (it's idempotent) and the distro is restarted so it takes effect.
+    & wsl.exe -d $Distro -u root -- bash -c "printf '[boot]\nsystemd=true\n[user]\ndefault=root\n[interop]\nappendWindowsPath=false\n' > /etc/wsl.conf"
+    & wsl.exe --terminate $Distro
 
     # ----- the Linux installer, inside the distro -----
     Say 'Running the Linux installer inside WSL (several minutes the first time: Docker and the images are downloaded)'

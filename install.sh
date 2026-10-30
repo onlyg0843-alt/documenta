@@ -43,11 +43,19 @@ fi
 command -v curl >/dev/null 2>&1 || fail "curl is required. Install it (e.g. apt install curl) and run again."
 
 # ----- Docker -----
-if ! command -v docker >/dev/null 2>&1; then
+# "Usable" means the Linux Docker with the Compose plugin. Inside WSL a Windows docker.exe can appear on
+# the PATH through interop (under /mnt/c/...); that one must not count.
+docker_usable() {
+    local bin
+    bin="$(command -v docker 2>/dev/null)" || return 1
+    case "$bin" in /mnt/*) return 1 ;; esac
+    docker compose version >/dev/null 2>&1
+}
+if ! docker_usable; then
     say "Installing Docker"
     curl -fsSL https://get.docker.com | sh
 fi
-docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is missing. Install the docker-compose-plugin package and run again."
+docker_usable || fail "Docker is installed but 'docker compose' does not work. Install the docker-compose-plugin package and run again."
 systemctl enable --now docker >/dev/null 2>&1 || true
 
 # ----- files -----
