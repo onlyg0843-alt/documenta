@@ -267,7 +267,8 @@ Commands:
   backup [file]         Export the whole system, data included, to a .tar file
                         (default: your Documents folder).
   ip                    Show the internal address of the Linux environment.
-  uninstall [--purge]   Remove Documenta and ALL its data; asks first, --purge doesn't.
+  uninstall [--purge]   Remove Documenta and ALL its data. Shows what goes and asks you
+                        to type DELETE EVERYTHING; --purge doesn't ask.
                         Needs a window started as Administrator.
   help                  Show this help.
 
@@ -332,8 +333,15 @@ switch ($Command) {
         $id = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
         if (-not $id.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'Run this in a window started as Administrator.'; return }
         if ($Arg -ne '--purge') {
-            $answer = Read-Host 'This removes Documenta AND ALL ITS DATA from this server. Type yes to continue'
-            if ($answer -ne 'yes') { return }
+            Write-Host 'This removes Documenta from this server, for good:'
+            Write-Host '  - every document, template, record and file, and every user account'
+            Write-Host "  - the Linux environment '$distro' with Documenta's containers, ONLYOFFICE included,"
+            Write-Host '    and the backups made inside it (on its backup disk folder)'
+            Write-Host "  - its startup task, port forwarding and firewall rule, and the files in $dir"
+            Write-Host 'Backups on a network share stay. To keep a copy of everything first, run: documenta backup'
+            Write-Host ''
+            $answer = Read-Host 'Type DELETE EVERYTHING to remove Documenta'
+            if ($answer -cne 'DELETE EVERYTHING') { Write-Host 'Nothing changed.'; return }
         }
         Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
@@ -426,13 +434,15 @@ exit /b %ERRORLEVEL%
     if ($taskState -ne 'Running') { Write-Host "    Warning: the '$TaskName' startup task is not running (state: $taskState); see $Dir\start.log" -ForegroundColor Yellow }
     if ($adapter) { Write-Host "    Network:      $($adapter.Name) ($($adapter.Description)); the app answers on every address of this server" }
     # The default login only while it is still in use, the same check as at the end of install.sh: the server
-    # marks superadmin until someone sets a new password. If the database can't be asked: on a new installation.
+    # marks the super admin (docuadmin; older installations have superadmin) until someone sets a new password.
+    # Asked by role, so either name is found. If the database can't be asked: on a new installation.
     # The check goes in base64 so that no quoting survives the trip through wsl.exe and bash -c.
-    $check = 'cd /opt/documenta && docker compose exec -T mongodb mongosh --quiet "$(grep ''^DB_NAME='' .env | cut -d= -f2-)" --eval ''const u = db.users.findOne({username: "superadmin"}); print(u ? (u.mustChangePassword ? "default" : "changed") : "none")'''
+    $check = 'cd /opt/documenta && docker compose exec -T mongodb mongosh --quiet "$(grep ''^DB_NAME='' .env | cut -d= -f2-)" --eval ''const d = db.users.findOne({role: "superadmin", mustChangePassword: true}); print(d ? "default:" + d.username : (db.users.findOne({role: "superadmin"}) ? "changed" : "none"))'''
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($check))
     $account = ((& wsl.exe -d $Distro -u root -- bash -c "echo $b64 | base64 -d | bash" 2>$null) -join '').Trim()
-    $showLogin = if ($account -eq 'default') { $true } elseif ($account -eq 'changed') { $false } else { $fresh }
-    if ($showLogin) { Write-Host '    Login:        superadmin / changeme12345  (you will be asked to change it at first sign-in)' }
+    $loginName = if ($account -like 'default:*') { $account.Substring(8) } else { 'docuadmin' }
+    $showLogin = if ($account -like 'default:*') { $true } elseif ($account -eq 'changed') { $false } else { $fresh }
+    if ($showLogin) { Write-Host "    Login:        $loginName / changeme12345  (you will be asked to change it at first sign-in)" }
     Write-Host "    Files:        $Dir  (the app and its data live in the WSL distro '$Distro')"
     Write-Host '    Commands:     documenta help   lists them all: update, status, logs, version, backup, uninstall, ...'
     Write-Host '                  (open a new PowerShell window first, so the command is on the PATH)'

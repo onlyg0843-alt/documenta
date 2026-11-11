@@ -144,6 +144,10 @@ Commands:
   stop                 Stop everything. Data is kept.
   start                Start everything again after a stop.
   version              Show the installed version and check for a newer one.
+  uninstall [--purge]  Remove Documenta and ALL its data from this server. Shows what
+                       goes and asks you to type DELETE EVERYTHING; backups on the
+                       backup disk are kept unless you say so. --purge doesn't ask
+                       (and keeps the backups).
   help                 Show this help.
 
 Services: api (server), frontend (web app), onlyoffice (document editor),
@@ -252,7 +256,67 @@ open_editors() {
         2>/dev/null | tr -d '[:space:]'
 }
 
+# Removes Documenta from this server for good: its containers, their volumes and images (ONLYOFFICE included), the
+# database and every file people made (doc_data/), its settings and secrets (.env), the folder __DIR__ and this
+# command. It shows all that and asks for DELETE EVERYTHING first; backups on the backup disk are kept unless the
+# answer to their own question is YES. Docker itself and backups on a network share are left alone.
+# --purge: no questions (for scripts), backups kept.
+uninstall() {
+    local purge="$1" bdir n answer backups=keep
+    if [ "$(id -u)" -ne 0 ]; then echo "Run it as root: sudo documenta uninstall" >&2; exit 1; fi
+    if [ "$ON_WINDOWS" = 1 ]; then
+        echo "On Windows, uninstall from Windows: documenta uninstall, in a window started as Administrator." >&2
+        exit 1
+    fi
+    case "__DIR__" in /|/usr|/etc|/var|/home|/opt|/srv|"") echo "Refusing to remove __DIR__." >&2; exit 1 ;; esac
+    bdir="$(envval BACKUP_DISK)"; bdir="${bdir:-/srv/documenta-backups}"
+    n="$(ls "$bdir"/documenta-backup-*.tar.gz 2>/dev/null | wc -l | tr -d ' ')"
+
+    if [ "$purge" != "--purge" ]; then
+        echo "This removes Documenta from this server, for good:"
+        echo "  - every document, template, record and file, and every user account"
+        echo "    (the database and the files in __DIR__/doc_data)"
+        echo "  - Documenta's containers and their images, ONLYOFFICE included"
+        echo "  - its settings and secrets (.env), the folder __DIR__ and the documenta command"
+        echo "Docker itself stays, and so do backups on a network share."
+        echo
+        if [ "$n" -gt 0 ]; then
+            echo "There are $n backup(s) in $bdir: the only way to get this data back afterwards."
+            printf "Delete the backups too? Type YES to delete them; anything else keeps them: "
+            read -r answer
+            [ "$answer" = "YES" ] && backups=delete
+            echo
+        fi
+        printf "Type DELETE EVERYTHING to remove Documenta: "
+        read -r answer
+        if [ "$answer" != "DELETE EVERYTHING" ]; then echo "Nothing changed."; exit 1; fi
+        echo
+    fi
+
+    echo "Removing Documenta's containers, their data and images..."
+    docker compose down --volumes --rmi all --remove-orphans || true
+    cd /
+    echo "Removing __DIR__..."
+    rm -rf "__DIR__"
+    if [ "$backups" = delete ]; then
+        echo "Removing the backups in $bdir..."
+        rm -f "$bdir"/documenta-backup-*.tar.gz "$bdir"/documenta-backup-*.partial
+    fi
+    rm -f /usr/local/bin/documenta
+
+    echo
+    echo "Documenta and all its data have been removed from this server."
+    if [ "$backups" = keep ] && [ "$n" -gt 0 ]; then
+        echo "  Kept: $n backup(s) in $bdir. To bring one back on a new installation, follow RESTORE.txt inside it."
+    fi
+    if grep -q "documenta-backups" /etc/fstab 2>/dev/null; then
+        echo "  The backup disk is still mounted at every start (its line in /etc/fstab); remove that line if the disk is for something else now."
+    fi
+    echo "  Docker is still installed; remove it with your package manager if nothing else uses it."
+}
+
 case "${1:-help}" in
+    uninstall) uninstall "${2:-}" ;;
     update)
         if [ "${2:-}" != "--force" ]; then
             open="$(open_editors || true)"
@@ -309,19 +373,21 @@ if [ "$UP" = "1" ]; then
 else
     say "Documenta is starting at ${URL} but does not answer yet; check in a minute with: documenta status, documenta logs api"
 fi
-# The default login is shown only while it is still in use: the server creates superadmin / changeme12345
-# on first start and marks the account until someone sets a new password. If the database can't be asked,
-# it is shown on a new installation. (install.ps1 makes the same check for its own summary.)
+# The default login is shown only while it is still in use: the server creates the super admin on first start
+# (docuadmin / changeme12345; older installations have superadmin) and marks the account until someone
+# sets a new password. Asked by role, so either name is found. If the database can't be asked, it is shown on a
+# new installation. (install.ps1 makes the same check for its own summary.)
 ACCOUNT="$(docker compose exec -T mongodb mongosh --quiet "$(grep '^DB_NAME=' .env | cut -d= -f2-)" --eval \
-    'const u = db.users.findOne({username: "superadmin"}); print(u ? (u.mustChangePassword ? "default" : "changed") : "none")' \
+    'const d = db.users.findOne({role: "superadmin", mustChangePassword: true}); print(d ? "default:" + d.username : (db.users.findOne({role: "superadmin"}) ? "changed" : "none"))' \
     2>/dev/null | tr -d '[:space:]' || true)"
+LOGIN_NAME=docuadmin
 case "$ACCOUNT" in
-    default) SHOW_LOGIN=1 ;;
-    changed) SHOW_LOGIN=0 ;;
-    *)       SHOW_LOGIN="$FRESH_INSTALL" ;;
+    default:*) SHOW_LOGIN=1; LOGIN_NAME="${ACCOUNT#default:}" ;;
+    changed)   SHOW_LOGIN=0 ;;
+    *)         SHOW_LOGIN="$FRESH_INSTALL" ;;
 esac
 if [ "$SHOW_LOGIN" = "1" ]; then
-    echo "    Login:        superadmin / changeme12345  (you will be asked to change it at first sign-in)"
+    echo "    Login:        ${LOGIN_NAME} / changeme12345  (you will be asked to change it at first sign-in)"
 fi
 echo "    Files:        ${DOCUMENTA_DIR}  (data in doc_data/, settings in .env)"
-echo "    Commands:     documenta help   lists them all: update, status, logs, restart, stop, start, version"
+echo "    Commands:     documenta help   lists them all: update, status, logs, restart, stop, start, version, uninstall"

@@ -14,9 +14,9 @@ Shared documents, fill-in templates and bulk records, edited in the browser with
 curl -fsSL https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.sh | sudo bash
 ```
 
-The command installs Docker if it's missing, puts everything in `/opt/documenta`, generates this installation's secrets, downloads the application and starts it. The first run takes a few minutes, mostly for the document server download. At the end it prints the address and the first login: `superadmin` / `changeme12345`, which you must change on first sign-in. The login is printed only until that password has been changed, so later updates don't show it.
+The command installs Docker if it's missing, puts everything in `/opt/documenta`, generates this installation's secrets, downloads the application and starts it. The first run takes a few minutes, mostly for the document server download. At the end it prints the address and the first login: `docuadmin` / `changeme12345` (`superadmin` on older installations), which you must change on first sign-in. The login is printed only until that password has been changed, so later updates don't show it.
 
-Then, signed in as superadmin, open the settings pages to set up ONLYOFFICE and upload your license, and optionally the Telegram page to connect your team's groups.
+Then, signed in as the super admin, open the settings pages to set up ONLYOFFICE and upload your license, and optionally the Telegram page to connect your team's groups.
 
 Options go in front of the command:
 
@@ -85,6 +85,6 @@ To stay on one version, or go back to it: `DOCUMENTA_VERSION=1.0.5 documenta upd
 | `/opt/documenta/doc_data/redis` | sign-in sessions |
 | `/opt/documenta/doc_data/backend` | uploaded files, license, activity logs |
 
-**Backup:** copy `/opt/documenta/doc_data` and `/opt/documenta/.env` together. To restore on a new server, put them back in place and run the installer.
+**Backup:** turn on Backups on the Features page: they go to a second disk mounted at `/srv/documenta-backups` (or `BACKUP_DISK` in `.env`) and/or a network share, on a schedule, and the Backups page shows how to set up the disk and restore. By hand: copy `/opt/documenta/doc_data` and `/opt/documenta/.env` together; to restore on a new server, put them back in place and run the installer.
 
-**Uninstall:** `documenta stop`, then delete `/opt/documenta` and `/usr/local/bin/documenta`.
+**Uninstall:** `sudo documenta uninstall` removes Documenta and all its data from the server: the database and every file, the containers and their images (ONLYOFFICE included), `.env`, `/opt/documenta` and the `documenta` command. It shows all that first and goes on only when you type `DELETE EVERYTHING`. Backups on the backup disk are kept unless you answer YES to deleting them as well; Docker and backups on a network share are never touched. `--purge` removes without asking and keeps the backups.

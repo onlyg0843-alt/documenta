@@ -41,6 +41,8 @@ services:
     volumes:
       - ./doc_data/backend:/app/data
       - /etc/machine-id:/etc/host-machine-id:ro   # the license is bound to this machine
+      # Backups: the second disk, mounted on the server (Backups page, "Set up the backup disk"); BACKUP_DISK in .env
+      - ${BACKUP_DISK:-/srv/documenta-backups}:/backups
     depends_on:
       - redis
       - mongodb
