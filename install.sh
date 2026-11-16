@@ -108,6 +108,22 @@ if [ -n "$DOCUMENTA_VERSION" ]; then sed -i "s|^DOCUMENTA_VERSION=.*|DOCUMENTA_V
 if [ -n "$DOCUMENTA_PORT" ]; then sed -i "s|^DOCUMENTA_PORT=.*|DOCUMENTA_PORT=${PORT}|" .env; fi
 VERSION="$(grep '^DOCUMENTA_VERSION=' .env | cut -d= -f2-)"
 
+# The VPN's office box (the compose profile "vpn") runs once its image exists for this version: a server kept on
+# a version from before the NetBird VPN runs without it, and nothing breaks before the first release that has it.
+# The registry answers 200 (there) or 404 (not there); anything else (no internet) leaves the setting as it was.
+vpn_image() {
+    local token
+    token="$(curl -fsS --max-time 10 "https://ghcr.io/token?scope=repository:${REPO}:pull&service=ghcr.io" 2>/dev/null | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+    [ -n "$token" ] || { echo unknown; return; }
+    curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -I -H "Authorization: Bearer ${token}" \
+        -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json" \
+        "https://ghcr.io/v2/${REPO}/manifests/vpn-${VERSION}" 2>/dev/null || echo unknown
+}
+case "$(vpn_image)" in
+    200) sed -i '/^COMPOSE_PROFILES=/d' .env; echo "COMPOSE_PROFILES=vpn" >> .env ;;
+    404) sed -i '/^COMPOSE_PROFILES=/d' .env ;;
+esac
+
 chmod -R 777 doc_data   # the containers run as different users
 
 # ----- the `documenta` command -----
@@ -358,10 +374,11 @@ else
 fi
 # The default login is shown only while it is still in use: the server creates the super admin on first start
 # (docuadmin / changeme12345; older installations have superadmin) and marks the account until someone
-# sets a new password. Asked by role, so either name is found. If the database can't be asked, it is shown on a
+# sets a new password. Asked by role (the Admin, stored as "admin" since 12 Nov 2026, "superadmin" before), so
+# either name is found. If the database can't be asked, it is shown on a
 # new installation.
 ACCOUNT="$(docker compose exec -T mongodb mongosh --quiet "$(grep '^DB_NAME=' .env | cut -d= -f2-)" --eval \
-    'const d = db.users.findOne({role: "superadmin", mustChangePassword: true}); print(d ? "default:" + d.username : (db.users.findOne({role: "superadmin"}) ? "changed" : "none"))' \
+    'const admin = {role: {$in: ["admin", "superadmin"]}}; const d = db.users.findOne({...admin, mustChangePassword: true}); print(d ? "default:" + d.username : (db.users.findOne(admin) ? "changed" : "none"))' \
     2>/dev/null | tr -d '[:space:]' || true)"
 LOGIN_NAME=docuadmin
 case "$ACCOUNT" in

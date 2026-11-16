@@ -1,9 +1,9 @@
 # The compose file installed on customers' servers by install.sh (which also writes the .env it reads).
 # Images come from GitHub Container Registry, built by the release workflow of the private repo
 # only-doc-main: one package, ghcr.io/onlyg0843-alt/documenta, with the service in the tag
-# (api-…, frontend-…, bot-…).
-# Data lives in ./doc_data next to this file: db (MongoDB), redis (sign-in sessions) and
-# backend (uploads, license, logs).
+# (api-…, frontend-…, bot-…, vpn-…).
+# Data lives in ./doc_data next to this file: db (MongoDB), redis (sign-in sessions),
+# backend (uploads, license, logs, the VPN's settings) and vpn-netbird (the VPN office box's identity).
 
 services:
 
@@ -89,6 +89,26 @@ services:
     networks:
       - external-ingress-nw
       - internal-local-nw
+
+  # The VPN's office box (NetBird): in the server's own network, so laptops connect to it directly, with nothing
+  # to open on the office router. The api writes what to join to doc_data/backend/vpn and reads who is connected;
+  # it does nothing until the Admin turns the VPN on and connects a VPN server. A compose profile: install.sh turns
+  # it on (COMPOSE_PROFILES=vpn in .env) only when the vpn image exists for the version this server runs.
+  vpn:
+    image: ghcr.io/onlyg0843-alt/documenta:vpn-${DOCUMENTA_VERSION:-latest}
+    profiles: ["vpn"]
+    container_name: doc_vpn
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    devices:
+      - /dev/net/tun
+    volumes:
+      - ./doc_data/backend/vpn:/config
+      - ./doc_data/vpn-netbird:/var/lib/netbird
 
   # Pinned on purpose: a customer's `documenta update` must not replace the document server (it drops
   # every open editing session). Bump the version here and in only-doc-main (docker-compose.yml and
