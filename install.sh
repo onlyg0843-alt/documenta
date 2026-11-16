@@ -43,12 +43,9 @@ fi
 command -v curl >/dev/null 2>&1 || fail "curl is required. Install it (e.g. apt install curl) and run again."
 
 # ----- Docker -----
-# "Usable" means the Linux Docker with the Compose plugin. Inside WSL a Windows docker.exe can appear on
-# the PATH through interop (under /mnt/c/...); that one must not count.
+# "Usable" means Docker with the Compose plugin.
 docker_usable() {
-    local bin
-    bin="$(command -v docker 2>/dev/null)" || return 1
-    case "$bin" in /mnt/*) return 1 ;; esac
+    command -v docker >/dev/null 2>&1 || return 1
     docker compose version >/dev/null 2>&1
 }
 if ! docker_usable; then
@@ -122,10 +119,6 @@ cat > /usr/local/bin/documenta <<'EOF'
 set -e
 cd "__DIR__"
 envval() { grep "^$1=" .env 2>/dev/null | cut -d= -f2-; }
-
-# On a Windows server this runs inside WSL, called by the Windows `documenta`; a few hints differ there
-ON_WINDOWS=0
-[ -n "${WSL_DISTRO_NAME:-}" ] && ON_WINDOWS=1
 
 show_help() {
     cat <<'HELP'
@@ -212,8 +205,6 @@ show_version() {
     elif [ "$(printf '%s\n%s\n' "$ver" "$newest" | sort -V | tail -n 1)" = "$newest" ]; then
         if [ "$channel" = "latest" ]; then
             echo "  Newest:       ${newest} is available: run documenta update"
-        elif [ "$ON_WINDOWS" = 1 ]; then
-            echo "  Newest:       ${newest} is available; to move to it, run the installer again after \$env:DOCUMENTA_VERSION = 'latest'"
         else
             echo "  Newest:       ${newest} is available; to move to it: DOCUMENTA_VERSION=latest documenta update"
         fi
@@ -241,11 +232,7 @@ show_version() {
         echo "  Running:      all ${total} services"
     fi
 
-    if [ "$ON_WINDOWS" = 1 ]; then
-        echo "  Linux folder: __DIR__  (inside the WSL environment '${WSL_DISTRO_NAME}')"
-    else
-        echo "  Installed in: __DIR__"
-    fi
+    echo "  Installed in: __DIR__"
 }
 
 # How many files are open in the editor right now: documents being edited, templates and records
@@ -264,10 +251,6 @@ open_editors() {
 uninstall() {
     local purge="$1" bdir n answer backups=keep
     if [ "$(id -u)" -ne 0 ]; then echo "Run it as root: sudo documenta uninstall" >&2; exit 1; fi
-    if [ "$ON_WINDOWS" = 1 ]; then
-        echo "On Windows, uninstall from Windows: documenta uninstall, in a window started as Administrator." >&2
-        exit 1
-    fi
     case "__DIR__" in /|/usr|/etc|/var|/home|/opt|/srv|"") echo "Refusing to remove __DIR__." >&2; exit 1 ;; esac
     bdir="$(envval BACKUP_DISK)"; bdir="${bdir:-/srv/documenta-backups}"
     n="$(ls "$bdir"/documenta-backup-*.tar.gz 2>/dev/null | wc -l | tr -d ' ')"
@@ -376,7 +359,7 @@ fi
 # The default login is shown only while it is still in use: the server creates the super admin on first start
 # (docuadmin / changeme12345; older installations have superadmin) and marks the account until someone
 # sets a new password. Asked by role, so either name is found. If the database can't be asked, it is shown on a
-# new installation. (install.ps1 makes the same check for its own summary.)
+# new installation.
 ACCOUNT="$(docker compose exec -T mongodb mongosh --quiet "$(grep '^DB_NAME=' .env | cut -d= -f2-)" --eval \
     'const d = db.users.findOne({role: "superadmin", mustChangePassword: true}); print(d ? "default:" + d.username : (db.users.findOne({role: "superadmin"}) ? "changed" : "none"))' \
     2>/dev/null | tr -d '[:space:]' || true)"

@@ -32,27 +32,6 @@ Example with another port:
 DOCUMENTA_PORT=8080 bash <(curl -fsSL https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.sh)
 ```
 
-## Install on Windows Server
-
-Documenta runs as Linux containers, so on Windows it lives inside WSL 2 (built into Windows Server 2022 and Windows 10/11; the server needs virtualization enabled, which for a VM means nested virtualization). Two ways to start:
-
-- **Setup program:** download `Documenta-Setup.msi` from the [latest release](https://github.com/onlyg0843-alt/documenta/releases/latest), run it and keep "Run the Documenta installer now" ticked. Later, "Install or update Documenta" in the Start Menu runs the same installer.
-- **One command**, in a PowerShell window started as Administrator:
-
-  ```powershell
-  irm https://raw.githubusercontent.com/onlyg0843-alt/documenta/main/install.ps1 | iex
-  ```
-
-The installer enables WSL 2 (one reboot the first time, then run it again), creates a Linux environment named `documenta` under `C:\Program Files\Documenta`, installs Docker inside it and then does exactly what the Linux install does. It forwards the chosen port from Windows to the app and registers a startup task that keeps the app running; it asks for your Windows password once so the app can start after a reboot without anyone signing in (press Enter to skip, then it starts when you sign in and stops when you sign out). Its questions come first, then it runs unattended and ends when the app answers. Options are the same as on Linux, set as `$env:DOCUMENTA_PORT = '8080'` before the command. If port 80 is already taken (IIS, for example) and you didn't choose a port, it uses 5075 and says so. If the server has several network adapters, the installer lists them right at the start and waits 20 seconds for you to pick the one people will use; otherwise it takes the first physical one. The app is reachable on every address of the server either way; the choice only decides which address is shown.
-
-Running the installer again updates Documenta, which restarts its services for a moment, exactly like `documenta update`. If the app stops answering, `documenta start` brings it back, and the startup task writes what it does to `C:\Program Files\Documenta\start.log`.
-
-For developers: the setup program's logo images (`windows/msi/banner.bmp`, `dialog.bmp`, `documenta.ico`) are rendered from the app's `frontend/public/documenta_icon.svg` (SVG → 512 px PNG with `sharp`, then drawn onto white with System.Drawing); regenerate them if the logo changes.
-
-Afterwards `documenta update`, `status`, `logs`, `version` and the others work from any new PowerShell or Command Prompt window, and `documenta help` lists them all. On Windows, `documenta version` also shows the address, whether the startup task is running, and the setup program's version. Two commands are Windows-only: `documenta backup [file]` exports the whole system including data to a `.tar` (in your Documents folder unless you name a file), and `documenta uninstall` removes everything.
-
-**Uninstalling on Windows:** "Documenta" in Apps & features (the setup program) stops Documenta and removes the program parts but keeps the data, in the WSL distro `documenta` under `C:\Program Files\Documenta\wsl`; it tells you so. `documenta uninstall` (in a window started as Administrator) removes the data as well; if you used the setup program, remove "Documenta" from Apps & features afterwards too.
-
 ## Update
 
 ```bash
